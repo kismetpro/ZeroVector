@@ -63,3 +63,16 @@ git pull --ff-only && ./update.sh            # 或 ./docker-build.sh && docker c
 - 原版用 8787/8788、本 fork 用 9787/9788，两个管理台可同时打开；登录态按端口（origin）隔离。
 - 不要共用 `.env`、`data/`、`state/` 或 PostgreSQL 数据卷；需要迁移数据请走备份/恢复，不要直接拷目录。
 - 只在本地跑一份时，用原版或本 fork 都行——错开端口不影响单独使用。
+
+## 品牌（界面显示名）
+
+界面上的产品名已全部替换为 **ZeroVector**：登录/初始化页、侧边栏、网页标题（`<title>`）、
+设置页各卡片、Basic Auth 提示、拦截提示、通知测试文案、启动日志行、终端 banner，
+以及 logo（`web/public/logo.png`、`web/src/app/icon.png`、`web/src/app/favicon.ico`）。
+
+- **登录用户名固定为 `ZeroVector`**（后端 `server/auth.go` 校验；`reset-password.sh` 的提示已同步）
+- 以下保留 `artex` 字样，都是功能性标识，改名会破坏兼容，**不要跟着改**：
+  环境变量 `ARTEX_*`、Go module 路径 `github.com/Autumn-27/artex`、可执行文件名 `artex`、
+  Cookie/localStorage `artex_token`、自更新中间文件 `artex.new` / `artex.old`、
+  worker 聊天标记 `ARTEX_WORKER_CHAT`
+- README/CHANGELOG 等上游文档仍写 ARTEX，随上游合并，不做改动

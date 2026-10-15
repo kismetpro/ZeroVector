@@ -270,7 +270,7 @@ export function UpdateCard() {
             Docker 下的更新只替换程序本身，不更新镜像里的 playwright / nmap 等工具链，且
             <span className="font-mono"> docker compose up -d </span>
             重建容器后会退回镜像自带的版本。需要连镜像一起升级请执行
-            <span className="font-mono"> docker compose pull artex &amp;&amp; docker compose up -d artex</span>。
+            <span className="font-mono"> ./docker-build.sh &amp;&amp; docker compose up -d artex</span>。
           </p>
         )}
 
@@ -306,7 +306,7 @@ export function UpdateCard() {
 
         <p className="text-xs text-muted-foreground">
           一键更新依赖守护脚本重启程序。请通过 <span className="font-mono">start.sh</span>（Windows 为
-          <span className="font-mono"> start.bat</span>）启动 ARTEX；直接运行 artex 本体时，程序退出后不会被自动拉起。
+          <span className="font-mono"> start.bat</span>）启动 ZeroVector；直接运行 artex 本体时，程序退出后不会被自动拉起。
         </p>
       </CardContent>
     </Card>

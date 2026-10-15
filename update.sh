@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ARTEX 更新脚本：① Docker 更新（重建镜像 + 重建容器）  ② 本地编译更新（重建二进制）
+# ZeroVector 更新脚本：① Docker 更新（重建镜像 + 重建容器）  ② 本地编译更新（重建二进制）
 # 与 install.sh 对应：install 负责首次落地，update 负责升级到新版本。
 # DB 迁移无需手动执行——artex 每次启动都会幂等重跑 schema.sql（含 ADD COLUMN/CREATE
 # INDEX IF NOT EXISTS），所以“重启即迁移”。数据（pgdata 卷、./data、./skills）不受影响。
@@ -60,7 +60,7 @@ update_local(){
 }
 
 echo "=============================="
-echo "  ARTEX 更新"
+echo "  ZeroVector 更新"
 echo "  1) Docker 更新（重新构建镜像并重建容器）"
 echo "  2) 本地更新（go 重新编译）"
 echo "=============================="
