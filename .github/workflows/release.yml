@@ -22,6 +22,7 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       commit: ${{ steps.commit.outputs.sha }}
+      docker_image: ${{ steps.version.outputs.docker_image }}
     steps:
       - name: Validate release version
         id: version
@@ -33,11 +34,14 @@ jobs:
             echo "正式版本必须是 v主版本.次版本.修订号，例如 v0.3.15" >&2
             exit 1
           fi
-          if [[ ! "$ARTEX_DOCKER_IMAGE" =~ ^[a-z0-9][a-z0-9_-]*/[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
-            echo "请先配置 Actions 变量 ARTEX_DOCKER_IMAGE，格式为 Docker Hub 用户名/镜像名" >&2
+          # 本 fork：未配置 ARTEX_DOCKER_IMAGE 时只发布 GitHub Release（各平台 zip +
+          # SHA256SUMS，供页面「一键更新」使用），跳过 Docker Hub 推送；配置了则照旧校验并发布镜像。
+          if [[ -n "$ARTEX_DOCKER_IMAGE" && ! "$ARTEX_DOCKER_IMAGE" =~ ^[a-z0-9][a-z0-9_-]*/[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
+            echo "ARTEX_DOCKER_IMAGE 格式应为 Docker Hub 用户名/镜像名" >&2
             exit 1
           fi
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "docker_image=$ARTEX_DOCKER_IMAGE" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ steps.version.outputs.tag }}
@@ -121,7 +125,9 @@ jobs:
 
   # ③ 汇总所有 zip → 创建 GitHub Release
   release:
-    needs: [prepare, binaries, docker-publish]
+    # 本 fork：镜像推送是可选的（docker_image 为空时 docker / docker-publish 会被跳过），
+    # 所以这里不能依赖 docker-publish，否则未配 Docker Hub 时永远不会发布 Release。
+    needs: [prepare, binaries]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -163,6 +169,23 @@ jobs:
             cat /tmp/artex-release.err >&2
             exit 1
           fi
+      - name: Compose release body
+        env:
+          DOCKER_IMAGE: ${{ needs.prepare.outputs.docker_image }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          {
+            if [[ -n "$DOCKER_IMAGE" ]]; then
+              echo "Docker Hub 镜像：\`$DOCKER_IMAGE:$RELEASE_TAG\`，同时提供 \`latest\`。"
+              echo "支持 Linux AMD64 / ARM64，Docker 会自动选择宿主机架构。"
+            else
+              echo "本次发布只提供程序包与 SHA256SUMS（未配置 Actions 变量 \`ARTEX_DOCKER_IMAGE\`，未推送 Docker 镜像）；需要镜像可在源码目录执行 \`./docker-build.sh\` 本地构建。"
+            fi
+            echo
+            echo "程序包提供 Linux、macOS 的 AMD64 / ARM64 及 Windows AMD64，并附 SHA256SUMS。"
+            echo
+            echo "安装与升级见 FORK.md：解压 zip 后用 start.sh / start.bat 启动；页面上的「一键更新」从本仓库 Releases 取新版本。"
+          } > release-body.md
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
@@ -173,11 +196,7 @@ jobs:
             dist/*.zip
             dist/SHA256SUMS
           generate_release_notes: true
-          body: |
-            Docker Hub 镜像：`${{ vars.ARTEX_DOCKER_IMAGE }}:${{ needs.prepare.outputs.tag }}`，同时提供 `latest`。
-            支持 Linux AMD64 / ARM64，Docker 会自动选择宿主机架构。
-            程序包提供 Linux、macOS 的 AMD64 / ARM64 及 Windows AMD64，并附 SHA256SUMS。
-            部署和在线更新说明见本仓库 README。
+          body_path: release-body.md
       - name: Publish complete release
         run: gh release edit "$RELEASE_TAG" --draft=false --latest
 
@@ -185,6 +204,8 @@ jobs:
   # 直接依赖发布 job，保证 ZIP、校验文件和镜像全部发布成功后才更新 Demo。
   demo:
     needs: [prepare, release]
+    # 本 fork 默认不跑 Vercel demo；需要时把仓库变量 ARTEX_VERCEL_DEMO 设为 true 并配置 VERCEL_TOKEN。
+    if: ${{ vars.ARTEX_VERCEL_DEMO == 'true' }}
     uses: ./.github/workflows/demo.yml
     with:
       tag: ${{ needs.prepare.outputs.tag }}
@@ -195,6 +216,7 @@ jobs:
   # ④ 在原生 AMD64 / ARM64 runner 上构建和测试，再推送架构镜像。
   docker:
     needs: [prepare, binaries]
+    if: ${{ needs.prepare.outputs.docker_image != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -266,6 +288,7 @@ jobs:
   # ⑤ 只有两种架构都通过启动验证，才发布正式版本和 latest 镜像。
   docker-publish:
     needs: [prepare, docker]
+    if: ${{ needs.prepare.outputs.docker_image != '' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: docker/setup-buildx-action@v3

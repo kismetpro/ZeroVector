@@ -37,7 +37,7 @@ export default function SystemSettingsPage() {
   const [saving, setSaving] = React.useState(false);
   const [savingKey, setSavingKey] = React.useState(false);
   const [pyInterp, setPyInterp] = React.useState("");
-  const [workers, setWorkers] = React.useState("3");
+  const [workers, setWorkers] = React.useState("1");
   const [savingWorkers, setSavingWorkers] = React.useState(false);
   // 操作约束注入范围(默认都开)。
   const [injectPlanner, setInjectPlanner] = React.useState(true);
@@ -57,7 +57,7 @@ export default function SystemSettingsPage() {
     setProxyInput(s.web_search_proxy ?? "");
     setGlobalProxyInput(s.global_proxy ?? "");
     setPyInterp(s.python_interpreter ?? "");
-    setWorkers(String(s.workers ?? 3));
+    setWorkers(String(s.workers ?? 1));
     setInjectPlanner(s.constraints_inject_planner !== false);
     setInjectWorker(s.constraints_inject_worker !== false);
     setNoaCompaction(!!s.noa_compaction);
@@ -657,7 +657,7 @@ export default function SystemSettingsPage() {
               工作并发 · Work Agent 数
             </CardTitle>
             <CardDescription>
-              每个任务并发运行的工作 agent 数量（默认 3）。数值越大并发探测越多、消耗也越高。修改后
+              每个任务并发运行的工作 agent 数量（默认 1）。数值越大并发探测越多、消耗也越高。修改后
               <b>对之后启动的任务生效</b>，正在运行的任务不受影响。
             </CardDescription>
           </CardHeader>
