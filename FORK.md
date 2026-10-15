@@ -59,8 +59,23 @@ git pull --ff-only && ./update.sh            # 或 ./docker-build.sh && docker c
   `server/basic_auth.go`、`guard/guard.go`、`cmd/artex/main.go`（banner 与启动日志）
 - `selfupdate/github.go`：发布源 `kismetpro/ZeroVector`
 - `.env.example`、`.gitignore`：镜像变量说明、`/state/` 与 `docker-compose.override.yml`
+- `.github/workflows/release.yml`：镜像/demo 作业的可选化（见下节）
 
-发布相关：`release.yml` 要在本 fork 发版时，需在 fork 的 Actions 里启用工作流，并设置仓库变量 `ARTEX_DOCKER_IMAGE`（格式 `DockerHub用户名/镜像名`）。
+## 发布与「一键更新」
+
+- **发版就是打 tag**：`git tag -a v0.3.23 -m "..." && git push origin v0.3.23`。
+  GitHub Actions（`.github/workflows/release.yml`）会构建 Linux/macOS/Windows 五个平台的
+  zip + `SHA256SUMS` 并创建 Release；本 fork 未配置镜像变量时自动跳过 Docker Hub 推送。
+- **页面「一键更新」指向本仓库 Releases**（`selfupdate.Repo = kismetpro/ZeroVector`）：
+  下载对应平台 zip → 校验 SHA256SUMS → 暂存新二进制 → 进程以退出码 75 退出，
+  由 `start.sh` / `start.bat` 换装并重新拉起（回滚也走这套）。
+- **版本号必须是 `vX.Y.Z`**（工作流会校验）。本地 `git describe` 带 `-dirty` / `-N-gxxxx`
+  的开发构建会被判为「不可比较」，因此不会触发更新——这是开发构建的预期行为；
+  想验证更新链路就用发布包的二进制（版本号干净）。
+- **可选**：连 Docker 镜像一起发 → 仓库变量 `ARTEX_DOCKER_IMAGE=DockerHub用户名/镜像名`
+  + secrets `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`，docker 作业会自动启用；
+  Vercel demo 默认关闭，需要时设仓库变量 `ARTEX_VERCEL_DEMO=true` 并配置 `VERCEL_TOKEN`。
+- 已发布版本：`v0.3.22`（首个 fork 版本，含零向品牌、端口错开、总览固定新版账本等改动）。
 
 ## 并行运行的注意点
 
