@@ -53,6 +53,10 @@ git pull --ff-only && ./update.sh            # 或 ./docker-build.sh && docker c
 - `docker-compose.yml`：`name: zerovector`、`image: ${ARTEX_IMAGE:-zerovector:local}` + `build`、宿主端口、`./state` 挂载
 - `dev.sh`、`install.sh`、`update.sh`、`docker-build.sh`：端口与「本地构建镜像」流程
 - `web/next.config.mjs`、`web/src/proxy.ts`、`web/src/lib/api.ts`：dev 反代/SSE 默认端口
+- 品牌相关：`web/src/config/app-config.ts`、`web/src/app/(auth)/{login,setup}/page.tsx`、
+  `web/src/app/(main)/_components/sidebar/app-sidebar.tsx`、`web/public/logo.png`、
+  `web/src/app/{icon.png,favicon.ico}`、`server/auth.go`（登录用户名）、
+  `server/basic_auth.go`、`guard/guard.go`、`cmd/artex/main.go`（banner 与启动日志）
 - `selfupdate/github.go`：发布源 `kismetpro/ZeroVector`
 - `.env.example`、`.gitignore`：镜像变量说明、`/state/` 与 `docker-compose.override.yml`
 
