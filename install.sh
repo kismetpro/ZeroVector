@@ -46,10 +46,10 @@ install_docker(){
   else
     info "沿用已存在的 .env"
   fi
-  info "拉取镜像并启动…"
-  docker compose pull
+  info "构建镜像并启动（首次构建需要几分钟）…"
+  ./docker-build.sh
   docker compose up -d
-  ok "启动完成 → http://localhost:8787"
+  ok "启动完成 → http://localhost:9787"
   info "查看日志：docker compose logs -f artex"
 }
 
@@ -61,11 +61,18 @@ install_local(){
   case "$(ask '选择' 1)" in
     2)
       ensure_docker
-      local pw; pw="$(ask 'Postgres 密码（回车随机）' "$(rand)")"
-      docker run -d --name artex-pg -p 5432:5432 \
-        -e POSTGRES_USER=artex -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=artex \
-        -v artex-pg:/var/lib/postgresql/data postgres:16-alpine
-      DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=artex DB_PASS="$pw" DB_NAME=artex DB_SSL=disable ;;
+      # 容器名与宿主端口都避开原版/系统 PostgreSQL：本 fork 固定 zerovector-pg + 5433。
+      local pw
+      if docker ps -a --format '{{.Names}}' | grep -qx zerovector-pg; then
+        info "已存在容器 zerovector-pg，直接复用（宿主端口 5433）"
+        pw="$(ask '该容器的 Postgres 密码' '')"
+      else
+        pw="$(ask 'Postgres 密码（回车随机）' "$(rand)")"
+        docker run -d --name zerovector-pg -p 127.0.0.1:5433:5432 \
+          -e POSTGRES_USER=artex -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=artex \
+          -v zerovector-pg-data:/var/lib/postgresql/data postgres:16-alpine
+      fi
+      DB_HOST=127.0.0.1 DB_PORT=5433 DB_USER=artex DB_PASS="$pw" DB_NAME=artex DB_SSL=disable ;;
     *)
       DB_HOST="$(ask '数据库地址' 127.0.0.1)"
       DB_PORT="$(ask '端口' 5432)"
@@ -107,7 +114,7 @@ JSON
   fi
   ok "编译完成 → ./artex"
 
-  info "启动…（Ctrl-C 退出）"
+  info "启动…（默认 http://localhost:9787；Ctrl-C 退出）"
   ./artex
 }
 

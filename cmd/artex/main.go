@@ -52,9 +52,11 @@ func main() {
 
 func run() int {
 	var (
-		addr    = flag.String("addr", ":8787", "HTTP listen address")
+		// 本 fork（ZeroVector）默认端口与原版 ARTEX 错开，便于同一台机器并存；
+		// 见仓库根目录的 FORK.md。需要时仍可用 -addr/-proxy 或环境变量覆盖。
+		addr    = flag.String("addr", ":9787", "HTTP listen address")
 		dataDir = flag.String("data", filepath.Join(config.BaseDir(), "data"), "data directory for SQLite stores (default: data/ next to the executable)")
-		proxy   = flag.String("proxy", "127.0.0.1:8788", "traffic recording proxy address (empty to disable)")
+		proxy   = flag.String("proxy", "127.0.0.1:9788", "traffic recording proxy address (empty to disable)")
 	)
 	flag.Parse()
 
@@ -112,7 +114,7 @@ func run() int {
 		skillDir = abs
 	}
 	log.Printf("[config] skill 目录: %s", skillDir)
-	srv := server.New(ctx, mgr, skillDir, *dataDir, config.BaseDir())
+	srv := server.New(ctx, mgr, skillDir, *dataDir, config.KeyDir())
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),

@@ -5,11 +5,13 @@
 # 构建上下文的 dist/<TARGETARCH>/artex。这样多架构构建时 arm64 只需模拟 apt 层，
 # 不再模拟 Next/Go 编译，速度快得多。
 #
-# 本地手动构建镜像时，先自行准备二进制：
+# 本地构建镜像：用仓库里的脚本一条龙（前端 + 单二进制 + 镜像）：
+#   ./docker-build.sh
+# 手工分步则是：
 #   cd web && npm run build:static && cd ..
 #   cp -r web/out server/webui/dist
 #   CGO_ENABLED=0 GOARCH=amd64 go build -tags embedui -o dist/amd64/artex ./cmd/artex
-#   docker build -t artex:local .
+#   docker build -t zerovector:local .
 FROM python:3.12-slim-bookworm
 ARG TARGETARCH
 # 常用工具：ripgrep / curl / vim，加一批 recon 常备件（按需增删）。
@@ -38,8 +40,14 @@ COPY dist/${TARGETARCH}/artex /app/artex
 COPY start.sh /app/start.sh
 RUN chmod +x /app/artex /app/start.sh
 COPY skills/ /app/skills/
-# data/（SQLite + jwt.key）持久化点
+# data/（工作区数据：流量录制、报表等）持久化点
 VOLUME ["/app/data"]
-EXPOSE 8787 8788
+# JWT 签名密钥放在独立目录（默认 /app/state，可用 ARTEX_KEY_DIR 覆盖）：
+# 密钥不能落在可浏览的 data/ 里，又要能在容器重建/升级后复用，否则每次
+# 更新都会把所有人踢下线。compose 把 ./state 挂到这里。
+ENV ARTEX_KEY_DIR=/app/state
+VOLUME ["/app/state"]
+# 端口与原版 ARTEX 错开（原版 8787/8788），便于同机并存；见 FORK.md。
+EXPOSE 9787 9788
 ENTRYPOINT ["/app/start.sh"]
-CMD ["-addr", ":8787", "-proxy", ":8788"]
+CMD ["-addr", ":9787", "-proxy", ":9788"]

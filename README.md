@@ -11,6 +11,8 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
 本仓库为独立维护的 [RuoJi6/ARTEX](https://github.com/RuoJi6/ARTEX)，保留 https://github.com/Autumn-27/ARTEX 的原始提交历史与 AGPL-3.0 许可证。程序发布包从本仓库 Releases 下载，Docker 镜像 [ruoji6/artex](https://hub.docker.com/r/ruoji6/artex) 由本仓库 GitHub Actions 构建并发布。
 
+> **本 fork（ZeroVector）**：默认端口、容器项目名、镜像名、状态目录与自更新源都已与原版错开（`9787`/`9788` 等），可与原版 ARTEX 在同一台机器上并存；差异清单与运行方式见 [FORK.md](FORK.md)。
+
 ---
 
 ## 截图预览

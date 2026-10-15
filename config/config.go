@@ -126,6 +126,22 @@ func SkillDir() string {
 	return d
 }
 
+// KeyDir returns the JWT signing key directory with precedence:
+//
+//	env ARTEX_KEY_DIR  >  BaseDir()
+//
+// The key deliberately does not live in the browsable workspace root (data
+// dir) — it must not be listable or downloadable through the file manager.
+// Container deployments point ARTEX_KEY_DIR at a dedicated volume so that
+// recreating or upgrading the container does not invalidate existing sessions.
+func KeyDir() string {
+	if v := strings.TrimSpace(os.Getenv("ARTEX_KEY_DIR")); v != "" {
+		_ = os.MkdirAll(v, 0o700)
+		return v
+	}
+	return BaseDir()
+}
+
 // PostgresDSN resolves the connection string with precedence:
 //
 //	env ARTEX_PG_DSN  >  config file (database.dsn, or assembled from fields)

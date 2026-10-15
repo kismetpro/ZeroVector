@@ -1,3 +1,9 @@
+# 本 fork（ZeroVector）的部署。与原版 ARTEX 的差异见 FORK.md：
+#   * compose 项目名固定为 zerovector（数据卷 zerovector_pgdata，不会撞原版的 artex_pgdata）
+#   * 镜像默认本地构建 zerovector:local，不占用/不覆盖原版的 ruoji6/artex
+#   * 宿主端口 9787 / 9788（原版用 8787 / 8788）
+name: zerovector
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -15,12 +21,16 @@ services:
     restart: unless-stopped
 
   artex:
-    image: ${ARTEX_IMAGE:-ruoji6/artex}:${ARTEX_TAG:-latest}
+    # 优先用本地构建的镜像（./docker-build.sh）；如需改用远端镜像，在 .env 里设 ARTEX_IMAGE。
+    image: ${ARTEX_IMAGE:-zerovector:local}
+    build:
+      context: .
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       ARTEX_PG_DSN: postgres://${POSTGRES_USER:-artex}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-artex}?sslmode=disable
+      ARTEX_KEY_DIR: /app/state
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ARTEX_LLM_PROVIDER: ${ARTEX_LLM_PROVIDER:-}
@@ -28,12 +38,14 @@ services:
       ARTEX_LLM_BASE_URL: ${ARTEX_LLM_BASE_URL:-}
       ARTEX_LLM_PROXY: ${ARTEX_LLM_PROXY:-}
     ports:
-      - "8787:8787"
-      - "127.0.0.1:8788:8788"
+      - "9787:9787"
+      - "127.0.0.1:9788:9788"
     volumes:
-      # 把数据目录（含 jwt.key、SQLite 等）绑定到项目根目录的 data/，
+      # 把数据目录（流量录制、报表等工作区数据）绑定到项目根目录的 data/，
       # 方便在宿主机直接查看/备份，容器重建也不丢。
       - ./data:/app/data
+      # JWT 签名密钥单独持久化：容器重建/升级后登录态不失效（密钥不进 data/）。
+      - ./state:/app/state
       # 把项目根目录的 skills 挂进容器（覆盖镜像内置的 /app/skills）；
       # 改 skill 无需重建镜像，容器读的就是宿主机这份。
       - ./skills:/app/skills

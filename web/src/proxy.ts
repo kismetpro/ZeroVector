@@ -12,7 +12,7 @@ export async function proxy(request: NextRequest) {
   // Remote dev backends remain usable when their optional gate is disabled.
   let gate: Response;
   try {
-    const backend = new URL(process.env.AUTOPENTEST_API ?? "http://localhost:8787");
+    const backend = new URL(process.env.AUTOPENTEST_API ?? "http://localhost:9787");
     if (!["http:", "https:"].includes(backend.protocol) || backend.username || backend.password) {
       return new NextResponse("认证后端地址配置无效", { status: 503 });
     }
