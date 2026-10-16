@@ -30,15 +30,24 @@ type sideRun struct {
 	done   chan struct{}
 }
 type sideQuestionState struct {
-	mu           sync.Mutex
-	commands     sync.Mutex // short admission / clear operations only, never inference
-	pending      map[string]sidequestion.Snapshot
-	latest       map[string]sidequestion.Snapshot
-	seen         map[string][2]int64
-	runs         map[string]sideRun
+	mu       sync.Mutex
+	commands sync.Mutex // short admission / clear operations only, never inference
+	pending  map[string]sidequestion.Snapshot
+	latest   map[string]sidequestion.Snapshot
+	seen     map[string][2]int64
+	runs     map[string]sideRun
+	// lastWrite throttles checkpoint persistence per session: the streaming publisher
+	// emits a snapshot every few hundred ms while a side question runs, and each row
+	// carries a 100KB+ JSONB payload — writing them all rewrites megabytes per second.
+	lastWrite    map[string]time.Time
 	done         chan struct{}
 	outputTokens int
 }
+
+// sideSnapshotMinInterval is the per-session floor between persisted checkpoints.
+// A crash can lose at most this much of the side-question context (it is only a
+// recovery checkpoint; the live UI reads the request rows).
+const sideSnapshotMinInterval = 3 * time.Second
 
 func sideModel(cfg agent.Config, id int64, name string) sidequestion.Model {
 	b, _ := json.Marshal([]any{cfg.Format, cfg.BaseURL, cfg.Model, cfg.ThinkingType, cfg.ReasoningEffort, cfg.Stream, cfg.MaxTokensField, cfg.SessionHeaderKey})
@@ -51,7 +60,7 @@ func bindSideProvider(p llm.Provider, cfg agent.Config, id int64, name string) l
 }
 
 func (s *Server) initSideQuestions() {
-	s.side = &sideQuestionState{pending: map[string]sidequestion.Snapshot{}, latest: map[string]sidequestion.Snapshot{}, seen: map[string][2]int64{}, runs: map[string]sideRun{}, done: make(chan struct{})}
+	s.side = &sideQuestionState{pending: map[string]sidequestion.Snapshot{}, latest: map[string]sidequestion.Snapshot{}, seen: map[string][2]int64{}, runs: map[string]sideRun{}, lastWrite: map[string]time.Time{}, done: make(chan struct{})}
 	if n, err := strconv.Atoi(os.Getenv("ARTEX_BTW_MAX_OUTPUT_TOKENS")); err == nil && n >= 256 && n <= 32768 {
 		s.side.outputTokens = n
 	}
@@ -99,6 +108,18 @@ func (s *Server) flushSideSnapshots() {
 	s.side.mu.Lock()
 	pending := s.side.pending
 	s.side.pending = map[string]sidequestion.Snapshot{}
+	now := time.Now()
+	for key, snap := range pending {
+		if last, ok := s.side.lastWrite[key]; ok && now.Sub(last) < sideSnapshotMinInterval {
+			// 仍在节流窗口内：把最新版本留在 pending，下个 tick 再落盘。
+			if newer, ok := s.side.pending[key]; !ok || newer.RunID < snap.RunID || newer.RunID == snap.RunID && newer.Version < snap.Version {
+				s.side.pending[key] = snap
+			}
+			delete(pending, key)
+			continue
+		}
+		s.side.lastWrite[key] = now
+	}
 	s.side.mu.Unlock()
 	for key, snap := range pending {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

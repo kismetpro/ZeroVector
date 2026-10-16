@@ -95,3 +95,32 @@ git pull --ff-only && ./update.sh            # 或 ./docker-build.sh && docker c
   Cookie/localStorage `artex_token`、自更新中间文件 `artex.new` / `artex.old`、
   worker 聊天标记 `ARTEX_WORKER_CHAT`
 - README/CHANGELOG 等上游文档仍写 ARTEX，随上游合并，不做改动
+
+## 性能优化（多任务下的 DB CPU / IO）
+
+上游把「资产是否属于任务范围」写成一个 OR 连接（`assets × task_scope`）：OR 跨多种列、
+且 `try_inet()` 包在索引列外面，任何索引都用不上，于是每次调用都退化成整表嵌套循环。
+实测（真实数据副本：8,715 资产 × 3,267 范围行）单次 **≈2.1 秒**，而它位于每个 agent
+资产读取（`list_assets`、按 id 取资产）的热路径上——多任务并行时正是它把库 CPU 打满。
+
+本 fork 的改动：
+
+- `db/task_assets_context.go`：新增 `scopeMatchUnion`，把范围匹配按 kind 拆成 UNION 分支
+  （company / root_domain / subdomain / ip / ip 字面量 domain / icp），并复用 `scope` CTE；
+  `scopeTargetCTE` 与 `contextCoverageCTE` 都改用它
+- `db/task_scope.go`：`covTargetCTE`（覆盖率、未测资产）同样改写
+- `db/schema.sql`：新增 `idx_av2_ip_inet` / `idx_av2_domain_inet` 两个**表达式 GiST 索引**——
+  函数包住列时必须有表达式索引，否则包含判断仍然全表扫（实测无索引该查询会退化到 16 秒）
+- `db/llm_usage.go`：新增 `idx_llm_usage_ts`，仪表盘按天聚合走索引
+- `server/commands.go`：`/api/tokens/usage` 结果缓存 60 秒（总览页每 15 秒轮询，过去每次
+  都对 `llm_usage` 做两次全表聚合）
+- `server/side_questions.go`：旁路问答检查点按会话节流到 ≥3 秒落盘（原为 250ms 一次，
+  每次重写 100KB+ 的 JSONB 大行）
+- `traffic/traffic.go`：流量索引 SQLite 增加 `synchronous=NORMAL`（WAL 下不损完整性，
+  省掉每请求一次 fsync；录制代理是"每请求一个事务"）
+
+实测效果（真实数据副本）：作用域查询 **2155 ms → 26 ms**（任务 6），其余任务
+1.6–2.3 s → 2.7–13 ms；**结果集 md5 与旧写法逐一相同**（5 个任务全等），因此不影响
+找洞覆盖面的判定。回归：`./test-local.sh -run 'Scope|Coverage|Untested|Inherited|Assets' ./db/... ./server/...` 全绿。
+
+同步上游时：若上游自行重构了作用域 CTE，优先采用上游实现，本 fork 的补丁可以丢。

@@ -96,6 +96,11 @@ CREATE INDEX IF NOT EXISTS idx_av2_domain       ON assets(domain)      WHERE dom
 CREATE INDEX IF NOT EXISTS idx_av2_root_domain  ON assets(root_domain) WHERE root_domain IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_av2_ip           ON assets(ip)          WHERE ip IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_av2_c_segment    ON assets USING GIST(c_segment inet_ops) WHERE c_segment IS NOT NULL;
+-- 作用域匹配里 `s.net >>= try_inet(a.ip)` / `try_inet(a.domain)` 两条分支的索引支撑
+-- （见 db/task_assets_context.go 的 scopeMatchUnion）：函数包裹列会让普通索引失效，
+-- 表达式 GiST 索引让"范围包含资产地址"的判定走索引而不是逐行算函数。
+CREATE INDEX IF NOT EXISTS idx_av2_ip_inet      ON assets USING GIST((try_inet(ip)) inet_ops);
+CREATE INDEX IF NOT EXISTS idx_av2_domain_inet  ON assets USING GIST((try_inet(domain)) inet_ops);
 CREATE INDEX IF NOT EXISTS idx_av2_technologies ON assets USING GIN(technologies) WHERE type = 'service';
 CREATE INDEX IF NOT EXISTS idx_av2_bound_domains ON assets USING GIN(bound_domains) WHERE type = 'ip';
 CREATE INDEX IF NOT EXISTS idx_av2_open_ports   ON assets USING GIN(open_ports)    WHERE type = 'ip';

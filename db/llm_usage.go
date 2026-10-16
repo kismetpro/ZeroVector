@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS llm_usage (
 CREATE INDEX IF NOT EXISTS idx_llm_usage_task  ON llm_usage(task_id);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_model ON llm_usage(task_id, model);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_exp   ON llm_usage(exploration_id);
+-- 仪表盘的按天聚合按 ts 过滤（UsageDaily）；没有它时每次轮询都全表扫。
+CREATE INDEX IF NOT EXISTS idx_llm_usage_ts    ON llm_usage(ts);
 `
 
 // EnsureLLMUsageTable creates the llm_usage metering table if it does not exist.

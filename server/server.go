@@ -113,6 +113,16 @@ type Server struct {
 	// learned about which backends are out of credit / rate-limited.
 	llmHealth *llmpool.Registry
 
+	// usageCache memoizes the dashboard token aggregate. The overview page polls
+	// /api/tokens/usage every 15 s and each call used to run two full-table
+	// aggregates over llm_usage (all-time per profile + per-day buckets), which is
+	// sustained DB CPU once a few dashboards are open. A minute of staleness is
+	// invisible on a token counter; see pgUsageStats.
+	usageCacheMu sync.Mutex
+	usageCacheAt time.Time
+	usageCache   map[string]any
+	usageCacheD  int
+
 	// Explicit task chains use one task-scoped dynamic provider shared by goals,
 	// planner, workers, and the main agent. Bundles are stable; their runtime reads
 	// the persisted current profile at every new LLM call.

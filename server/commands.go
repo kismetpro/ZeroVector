@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Autumn-27/artex/db"
 )
@@ -105,6 +106,12 @@ func (s *Server) pgUsageStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	days := atoiDefault(r.URL.Query().Get("days"), 365)
+	// 缓存 60 秒：总览页每 15 秒轮询一次，而每次都要对 llm_usage 做「全时段按 profile 汇总 +
+	// 按天分桶」两次聚合（表只会越长越大）。token 计数晚一分钟显示没有实际影响。
+	if payload, ok := s.cachedUsageStats(days); ok {
+		writeJSON(w, 200, payload)
+		return
+	}
 	byProfile, err := pg.UsageByProfile()
 	if err != nil {
 		writeErr(w, 500, err.Error())
@@ -115,7 +122,28 @@ func (s *Server) pgUsageStats(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"by_profile": byProfile, "daily": daily})
+	payload := map[string]any{"by_profile": byProfile, "daily": daily}
+	s.storeUsageStats(days, payload)
+	writeJSON(w, 200, payload)
+}
+
+const usageStatsTTL = time.Minute
+
+func (s *Server) cachedUsageStats(days int) (map[string]any, bool) {
+	s.usageCacheMu.Lock()
+	defer s.usageCacheMu.Unlock()
+	if s.usageCache == nil || s.usageCacheD != days || time.Since(s.usageCacheAt) > usageStatsTTL {
+		return nil, false
+	}
+	return s.usageCache, true
+}
+
+func (s *Server) storeUsageStats(days int, payload map[string]any) {
+	s.usageCacheMu.Lock()
+	defer s.usageCacheMu.Unlock()
+	s.usageCache = payload
+	s.usageCacheD = days
+	s.usageCacheAt = time.Now()
 }
 
 // pgLLMTasks returns distinct recorded tasks with counts, for the page's task

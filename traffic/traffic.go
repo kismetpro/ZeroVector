@@ -189,7 +189,9 @@ func Open(dir, addr string) (*Traffic, error) {
 	index := filepath.Join(dir, "_index", "index.sqlite")
 	dsn := index
 	if !strings.ContainsRune(index, '?') {
-		dsn = "file:" + index + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+		// synchronous=NORMAL：WAL 模式下依然不会损坏数据库（只有掉电可能丢最后几个事务），
+		// 但省掉了每次提交的 fsync —— 录制代理是每请求一个事务，代理高峰期这一项就是 IO 瓶颈。
+		dsn = "file:" + index + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -256,7 +258,7 @@ func (t *Traffic) initIndex() error {
 	// Re-applied rather than left to the DSN so the bare-DSN fallback in Open is
 	// still correct: journal_mode persists in the file header, which is what every
 	// later connection reads.
-	for _, p := range []string{`PRAGMA journal_mode=WAL`, `PRAGMA busy_timeout=5000`} {
+	for _, p := range []string{`PRAGMA journal_mode=WAL`, `PRAGMA busy_timeout=5000`, `PRAGMA synchronous=NORMAL`} {
 		if _, err := conn.ExecContext(ctx, p); err != nil {
 			return err
 		}
