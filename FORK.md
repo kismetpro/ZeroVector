@@ -119,6 +119,44 @@ git pull --ff-only && ./update.sh            # 或 ./docker-build.sh && docker c
 - `traffic/traffic.go`：流量索引 SQLite 增加 `synchronous=NORMAL`（WAL 下不损完整性，
   省掉每请求一次 fsync；录制代理是"每请求一个事务"）
 
+## PostgreSQL 调参（多任务并发）
+
+官方镜像默认 `shared_buffers=128MB`、`work_mem=4MB`、`max_wal_size=1GB`、`random_page_cost=4`、
+autovacuum 只有 3 个 worker / 60s 一轮，对"多任务并发 + 聚合查询"明显偏小。
+
+- `docker-compose.yml` 的 postgres 服务带上一组单机部署参数，全部可用 `.env` 覆盖
+  （见 `.env.example` 注释）：`shared_buffers=2GB`（16GB 内存机器取 25% 的一半，整库可常驻内存）、
+  `effective_cache_size=6GB`（只是规划器提示）、`work_mem=16MB`、`maintenance_work_mem=512MB`、
+  `max_wal_size=4GB`、`checkpoint_timeout=15min`、`random_page_cost=1.1`（SSD）、
+  `autovacuum_max_workers=4`、`autovacuum_naptime=30s`、`track_io_timing=on`、
+  `shared_preload_libraries=pg_stat_statements`
+- `db/schema.sql`：给高 churn 表设逐表 autovacuum 参数（activity、conversation_activities、
+  exploration_nodes（含 fillfactor）、side_question_sessions（含 toast）、task_asset_links、
+  assets、scheduler_state、tool_usage、notification_events、findings），并尝试创建
+  `pg_stat_statements`（未预载时忽略失败，不影响启动）
+- **服务级参数（shared_buffers 等）必须重建 postgres 容器才生效**；表级参数由启动时的
+  schema.sql 幂等应用，不需要重启
+
+给已有部署（例如原版 ARTEX 的容器）落地：
+
+```bash
+# 1) 服务级：项目目录放 docker-compose.override.yml（建议加入 .git/info/exclude），只重建 PG
+docker compose up -d postgres
+# 2) 表级 + 扩展：把 schema.sql 里那一段整块应用到目标库
+psql "$DSN" -f <(sed -n '/高 churn 表的 autovacuum 参数/,/^END \$\$;$/p' db/schema.sql)
+```
+
+看谁在吃 CPU（这就是本次排查缺的那把尺子）：
+
+```sql
+SELECT calls, round(total_exec_time) AS ms, round(mean_exec_time, 2) AS avg_ms, left(query, 80) AS q
+FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20;
+```
+
+回滚：表级 `ALTER TABLE <t> RESET (...)`；服务级删掉 override 再 `docker compose up -d postgres`。
+进一步（可选，谨慎）：`synchronous_commit=off` 能明显降低 WAL 同步开销，代价是掉电可能丢
+最近几十毫秒的写入——对审批/审计类数据默认不开。
+
 实测效果（真实数据副本）：作用域查询 **2155 ms → 26 ms**（任务 6），其余任务
 1.6–2.3 s → 2.7–13 ms；**结果集 md5 与旧写法逐一相同**（5 个任务全等），因此不影响
 找洞覆盖面的判定。回归：`./test-local.sh -run 'Scope|Coverage|Untested|Inherited|Assets' ./db/... ./server/...` 全绿。

@@ -7,6 +7,38 @@ name: zerovector
 services:
   postgres:
     image: postgres:16-alpine
+    # 默认 128MB shared_buffers 对"多任务并发 + 聚合查询"明显偏小；这里给出面向
+    # 单机部署的保守调参（可用 .env 覆盖）。数值按 16GB 内存机器取的：共享缓冲约 2GB
+    # （库整体能装进内存），effective_cache_size 只是规划器提示不占内存，
+    # work_mem 16MB × 并发排序数才是真实上限。
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-2GB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-6GB}
+      - -c
+      - work_mem=${POSTGRES_WORK_MEM:-16MB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-512MB}
+      - -c
+      - max_wal_size=${POSTGRES_MAX_WAL_SIZE:-4GB}
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - random_page_cost=${POSTGRES_RANDOM_PAGE_COST:-1.1}
+      - -c
+      - autovacuum_max_workers=4
+      - -c
+      - autovacuum_naptime=30s
+      - -c
+      - track_io_timing=on
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-artex}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 设置 POSTGRES_PASSWORD}

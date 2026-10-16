@@ -47,6 +47,8 @@ CREATE INDEX IF NOT EXISTS idx_llm_usage_model ON llm_usage(task_id, model);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_exp   ON llm_usage(exploration_id);
 -- 仪表盘的按天聚合按 ts 过滤（UsageDaily）；没有它时每次轮询都全表扫。
 CREATE INDEX IF NOT EXISTS idx_llm_usage_ts    ON llm_usage(ts);
+-- 只增不改的账本：vacuum 压力小，但规划器统计要跟得上（仪表盘按 profile/天聚合）。
+ALTER TABLE llm_usage SET (autovacuum_analyze_scale_factor=0.02, autovacuum_analyze_threshold=500);
 `
 
 // EnsureLLMUsageTable creates the llm_usage metering table if it does not exist.

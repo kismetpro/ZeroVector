@@ -1549,3 +1549,31 @@ CREATE TABLE IF NOT EXISTS task_schedule_history (
  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_history ON task_schedule_history(schedule_id,id DESC);
+
+-- ── 高 churn 表的 autovacuum 参数 ────────────────────────────────────────────
+-- 默认阈值（20% 死元组才 vacuum、10% 变更才 analyze）是按"大而冷"的表设计的：
+-- 对几百行、每秒都在改的表等于几乎不清理，死元组堆积、索引膨胀、规划器统计过期。
+-- 生产实测的痛点表：activity 18.8 万行/279MB、exploration_nodes 3.97 万次 UPDATE/5.8 千行、
+-- side_question_sessions 5.6 万次 UPDATE/2.5 千行（含 100KB+ TOAST 行）、scheduler_state 2 万次 UPDATE/5 行。
+-- 策略：小而热的表用"绝对阈值 + 极小比例"，让 autovacuum 按行数而不是百分比触发。
+ALTER TABLE activity                SET (autovacuum_vacuum_scale_factor=0.05, autovacuum_vacuum_threshold=200, autovacuum_analyze_scale_factor=0.02, autovacuum_analyze_threshold=200);
+ALTER TABLE conversation_activities SET (autovacuum_vacuum_scale_factor=0.05, autovacuum_vacuum_threshold=200, autovacuum_analyze_scale_factor=0.02, autovacuum_analyze_threshold=200);
+ALTER TABLE exploration_nodes       SET (autovacuum_vacuum_scale_factor=0.02, autovacuum_vacuum_threshold=50,  autovacuum_analyze_scale_factor=0.01, autovacuum_analyze_threshold=50, fillfactor=85);
+ALTER TABLE side_question_sessions  SET (autovacuum_vacuum_scale_factor=0.02, autovacuum_vacuum_threshold=20,  autovacuum_analyze_scale_factor=0.01, autovacuum_analyze_threshold=20,
+                                         toast.autovacuum_vacuum_scale_factor=0.05, toast.autovacuum_vacuum_threshold=50);
+ALTER TABLE task_asset_links        SET (autovacuum_vacuum_scale_factor=0.05, autovacuum_vacuum_threshold=100, autovacuum_analyze_scale_factor=0.02, autovacuum_analyze_threshold=100);
+ALTER TABLE assets                  SET (autovacuum_vacuum_scale_factor=0.05, autovacuum_vacuum_threshold=100, autovacuum_analyze_scale_factor=0.02, autovacuum_analyze_threshold=100);
+ALTER TABLE scheduler_state         SET (autovacuum_vacuum_scale_factor=0, autovacuum_vacuum_threshold=50, autovacuum_analyze_scale_factor=0, autovacuum_analyze_threshold=50);
+ALTER TABLE tool_usage              SET (autovacuum_analyze_scale_factor=0.05, autovacuum_analyze_threshold=200);
+ALTER TABLE notification_events     SET (autovacuum_vacuum_scale_factor=0.05, autovacuum_analyze_scale_factor=0.02);
+ALTER TABLE findings                SET (autovacuum_vacuum_scale_factor=0.05, autovacuum_analyze_scale_factor=0.02);
+
+-- pg_stat_statements 是定位"哪条 SQL 在吃 CPU"最有效的工具（本次性能排查就缺它）。
+-- 需要 postgres 以 shared_preload_libraries=pg_stat_statements 启动（本 fork 的
+-- docker-compose.yml 已加）；未预载或权限不足时忽略失败，不影响启动。
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'pg_stat_statements 未启用（缺 shared_preload_libraries 或权限）：%', SQLERRM;
+END $$;
