@@ -26,8 +26,10 @@ import { PanelLeftIcon } from "lucide-react"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-// 本 fork：默认宽度收窄到 13rem，刚好容纳图标 + 中文菜单文字，不留大片空白。
-const SIDEBAR_WIDTH = "13rem"
+// 本 fork：默认宽度收窄到 10.5rem（168px）。实测最宽的元素是菜单项
+// （8px 内边距 + 16px 图标 + 8px 间距 + 最多 5 个中文字 ≈ 100px）与子项缩进（≈110px），
+// 标题行的 logo 也已从 40px 缩到 28px，因此这个宽度刚好放下文字、不留空白。
+const SIDEBAR_WIDTH = "10.5rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
