@@ -130,7 +130,12 @@ func (s *Server) startFindingRetest(w http.ResponseWriter, r *http.Request) {
 		s.chatMu.Lock()
 		s.chatBusy[busyKey] = true
 		s.chatMu.Unlock()
-		s.runConversation(conv, retest.InitialMessage(), busyKey)
+		// 复测属于该 finding 所在的任务：登记成任务级运行，任务暂停时一并中止。
+		var taskID int64
+		if f.TaskID != nil {
+			taskID = *f.TaskID
+		}
+		s.runConversationForTask(conv, retest.InitialMessage(), busyKey, taskID)
 	}
 	code := http.StatusOK
 	if created {

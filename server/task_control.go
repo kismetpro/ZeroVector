@@ -141,6 +141,11 @@ func (s *Server) applyTaskControlWithCause(t *Task, action string, pauseCause er
 		// after the persistent pause commits, so a failed control request is fully
 		// compensated and does not lose an otherwise valid conversation turn.
 		s.cancelTaskChat(t.ID, agent.AbortChatPausedWithTask)
+		// 任务级的其它 agent 运行（reporter 触发器、复测会话）此前只按会话键登记，
+		// 暂停只取消了主 agent 那一轮，于是页面暂停后 reporter 仍继续产出。这里一并中止。
+		if n := s.cancelTaskRuns(t.ID, agent.AbortChatPausedWithTask); n > 0 {
+			log.Printf("[task] #%s 暂停：同时中止 %d 个任务级 agent 运行（触发器/复测）", t.ID, n)
+		}
 		out.Paused, out.Status = true, "paused"
 		go s.reconcileConcurrency()
 	case "resume":
@@ -148,6 +153,8 @@ func (s *Server) applyTaskControlWithCause(t *Task, action string, pauseCause er
 		if err != nil {
 			return out, err
 		}
+		// 暂停期间被拦下的触发器事件（reporter 等）现在放行。
+		s.pumpAllTriggers()
 		out.Queued = queued
 		out.Status = map[bool]string{true: "queued", false: "running"}[queued]
 	default:

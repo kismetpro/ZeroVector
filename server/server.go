@@ -123,6 +123,16 @@ type Server struct {
 	usageCache   map[string]any
 	usageCacheD  int
 
+	// taskRuns tracks cancellable agent runs that belong to a task but are NOT its
+	// main-agent chat (that one is chatBusy/chatCancel keyed by the task id):
+	// triggered fires (reporter 的漏洞整理等) and finding retests. They used to be
+	// reachable only through their conversation key, so pausing a task cancelled the
+	// main chat and left the reporter/retest turns running — the reported symptom.
+	// taskID → runID → cancel; registerTaskRun returns the release func.
+	runMu    sync.Mutex
+	taskRuns map[string]map[uint64]context.CancelCauseFunc
+	runSeq   uint64
+
 	// Explicit task chains use one task-scoped dynamic provider shared by goals,
 	// planner, workers, and the main agent. Bundles are stable; their runtime reads
 	// the persisted current profile at every new LLM call.
@@ -164,6 +174,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	}
 	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, chatBusy: map[string]bool{},
 		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
+		taskRuns: map[string]map[uint64]context.CancelCauseFunc{},
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
@@ -3885,6 +3896,81 @@ func (s *Server) cancelTaskChat(taskID string, cause error) bool {
 	}
 	s.chatMu.Unlock()
 	return cancel != nil
+}
+
+// registerTaskRun records a task-scoped agent run (triggered fire, retest) so a
+// pause cancels it too. Registering happens BEFORE the turn starts, so an immediate
+// pause cannot miss a run that has not reached its first LLM call yet. The returned
+// release func must be deferred by the caller.
+func (s *Server) registerTaskRun(taskID int64, cancel context.CancelCauseFunc) func() {
+	if taskID <= 0 || cancel == nil {
+		return func() {}
+	}
+	key := strconv.FormatInt(taskID, 10)
+	s.runMu.Lock()
+	if s.taskRuns == nil {
+		s.taskRuns = map[string]map[uint64]context.CancelCauseFunc{}
+	}
+	s.runSeq++
+	id := s.runSeq
+	if s.taskRuns[key] == nil {
+		s.taskRuns[key] = map[uint64]context.CancelCauseFunc{}
+	}
+	s.taskRuns[key][id] = cancel
+	s.runMu.Unlock()
+	return func() {
+		s.runMu.Lock()
+		if runs := s.taskRuns[key]; runs != nil {
+			delete(runs, id)
+			if len(runs) == 0 {
+				delete(s.taskRuns, key)
+			}
+		}
+		s.runMu.Unlock()
+	}
+}
+
+// cancelTaskRuns cancels every task-scoped run registered for taskID, returning how
+// many it reached. Used by the pause path (the main-agent chat has its own slot).
+func (s *Server) cancelTaskRuns(taskID string, cause error) int {
+	s.runMu.Lock()
+	runs := s.taskRuns[taskID]
+	cancels := make([]context.CancelCauseFunc, 0, len(runs))
+	for _, cancel := range runs {
+		cancels = append(cancels, cancel)
+	}
+	s.runMu.Unlock()
+	for _, cancel := range cancels {
+		cancel(cause)
+	}
+	return len(cancels)
+}
+
+// taskPaused reports the authoritative pause state, for callers that must not start
+// new target-facing agent work (the trigger pump). The engine flag is the live one;
+// the persisted lifecycle covers a task whose loops are not running yet.
+func (s *Server) taskPaused(taskID int64) bool {
+	if taskID <= 0 || s.engine == nil {
+		return false
+	}
+	id := strconv.FormatInt(taskID, 10)
+	if s.engine.IsPaused(id) {
+		return true
+	}
+	if t, ok := s.m.Task(id); ok && t != nil && t.lifecycleSnapshot().Paused {
+		return true
+	}
+	return false
+}
+
+// pumpAllTriggers re-pumps every agent queue. Fires belonging to a paused task are
+// held back by pumpLocked, so a resume must nudge the pumps to launch them.
+func (s *Server) pumpAllTriggers() {
+	s.queueMu.Lock()
+	defer s.queueMu.Unlock()
+	for agentKey := range s.triggerQ {
+		s.pumpLocked(agentKey)
+	}
 }
 
 func (s *Server) finishTaskChat(taskID string, cancel context.CancelCauseFunc) {

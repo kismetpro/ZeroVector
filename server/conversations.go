@@ -463,13 +463,24 @@ func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Reques
 // conversation_activities. Shared by the chat HTTP handler and the P3 scheduler.
 // busyKey clears when the run ends (best-effort in-flight marker).
 func (s *Server) runConversation(c *db.Conversation, msg, busyKey string, userMessage ...string) {
+	s.runConversationForTask(c, msg, busyKey, 0, userMessage...)
+}
+
+// runConversationForTask is runConversation with task-scoped cancellation: when
+// taskID > 0 the run's cancel is registered under the task, so pausing that task
+// stops this turn (used by finding retests).
+func (s *Server) runConversationForTask(c *db.Conversation, msg, busyKey string, taskID int64, userMessage ...string) {
 	ctx, cancel := s.conversationRunContext(c.ID, busyKey)
 	// Only the human-message handler supplies this field, before adding the
 	// attachment manifest. Scheduler/retest prompts must not be labelled as users.
 	if len(userMessage) == 1 {
 		ctx = intercept.WithReviewContext(ctx, "", intercept.ReviewBackground{Source: intercept.BackgroundUserMessage, Text: userMessage[0]})
 	}
-	go s.runConversationTurn(ctx, cancel, c, msg, busyKey)
+	release := s.registerTaskRun(taskID, cancel)
+	go func() {
+		defer release()
+		s.runConversationTurn(ctx, cancel, c, msg, busyKey)
+	}()
 }
 
 // runConversationSync runs ONE agent turn on a conversation and BLOCKS until the
@@ -477,7 +488,16 @@ func (s *Server) runConversation(c *db.Conversation, msg, busyKey string, userMe
 // fire-and-forget chat path; the P3 trigger queue calls it directly so it can wait
 // for completion before starting the next queued fire for the same agent.
 func (s *Server) runConversationSync(c *db.Conversation, msg, busyKey string) {
+	s.runConversationSyncForTask(c, msg, busyKey, 0)
+}
+
+// runConversationSyncForTask is runConversationSync plus the same task-scoped
+// cancellation contract: triggered fires (reporter 等) are keyed by conversation,
+// so without this a task pause left them running to completion.
+func (s *Server) runConversationSyncForTask(c *db.Conversation, msg, busyKey string, taskID int64) {
 	ctx, cancel := s.conversationRunContext(c.ID, busyKey)
+	release := s.registerTaskRun(taskID, cancel)
+	defer release()
 	s.runConversationTurn(ctx, cancel, c, msg, busyKey)
 }
 
@@ -664,10 +684,22 @@ func (s *Server) pumpLocked(agentKey string) {
 			limit = cfg.maxParallel
 		}
 	}
+	// Fires whose task is paused are held (not dropped): they are re-queued at the
+	// head and launched by pumpAllTriggers once the task resumes.
+	var held []triggeredRun
 	for s.triggerActive[agentKey] < limit && len(s.triggerQ[agentKey]) > 0 {
 		item := s.nextTriggerRun(agentKey, cfg)
+		if s.taskPaused(item.taskID) {
+			// 任务已暂停：不启动新的 agent 回合，但也不丢事件——先留住，等 resume 时
+			// pumpAllTriggers 再跑（nextTriggerRun 已把它从队列摘掉，循环不会空转）。
+			held = append(held, item)
+			continue
+		}
 		s.triggerActive[agentKey]++
 		go s.runAndPump(agentKey, item)
+	}
+	if len(held) > 0 {
+		s.triggerQ[agentKey] = append(held, s.triggerQ[agentKey]...)
 	}
 }
 
@@ -862,7 +894,7 @@ func (s *Server) runTriggeredRun(item triggeredRun) {
 	s.chatMu.Lock()
 	s.chatBusy[busyKey] = true
 	s.chatMu.Unlock()
-	s.runConversationSync(c, msg, busyKey)
+	s.runConversationSyncForTask(c, msg, busyKey, item.taskID)
 }
 
 // firstLine returns a single-line, length-capped preview (shared with summaries).
